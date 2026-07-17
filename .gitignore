@@ -1,0 +1,38 @@
+node_modules
+.next
+out
+build
+.env
+.env*.local
+*.log
+.DS_Store
+prisma/dev.db
+prisma/dev.db-journal
+next-env.d.ts
+.vercel
+.open-next
+
+# internal docs — NOT part of the public template
+RESEARCH.md
+TEAM_SYNC.md
+APP_SPECS.md
+VERIFICATION.md
+.env*
+APP_IDEAS.md
+ATLAS_MODELS.md
+model-capabilities.json
+APP_IDEAS_v1.md
+开源项目调研.md
+功能审查.md
+创意玩法调研.md
+模型多参能力-应用与调用.md
+项目总结.md
+复现指南.md
+
+# local scratch
+scratchpad
+
+# local wrangler state & build cache (never commit)
+.wrangler
+tsconfig.tsbuildinfo
+.dev.vars

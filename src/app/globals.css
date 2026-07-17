@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-neutral-50 text-neutral-900 antialiased;
+  background-image:
+    radial-gradient(55rem 55rem at 105% -10%, rgba(124, 58, 237, 0.07), transparent 60%),
+    radial-gradient(45rem 45rem at -10% 5%, rgba(99, 102, 241, 0.06), transparent 55%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #7c3aed, #c026d3 55%, #6366f1);
+  }
+  .card {
+    @apply rounded-2xl border border-neutral-200/70 bg-white shadow-soft;
+  }
+  .btn-brand {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-gradient px-5 py-3 font-semibold text-white shadow-glow transition-all;
+  }
+  .btn-brand:hover {
+    @apply brightness-110;
+  }
+  .btn-brand:active {
+    transform: scale(0.98);
+  }
+  .btn-brand:disabled {
+    @apply cursor-not-allowed opacity-50 shadow-none;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-neutral-300 bg-white px-5 py-3 font-medium text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50;
+  }
+}
+
+/* skeleton shimmer for loading states */
+.skeleton {
+  @apply relative overflow-hidden bg-neutral-100;
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: shimmer 1.6s infinite;
+}

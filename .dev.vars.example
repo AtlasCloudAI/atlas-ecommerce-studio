@@ -1,0 +1,12 @@
+# 本地 cf:preview 用(wrangler 读 .dev.vars);生产用 `wrangler secret put <KEY>`。
+# 复制为 .dev.vars 并填值(勿提交 .dev.vars)。
+DATABASE_URL=            # Neon 连接串(必须 neon,queryCompiler+adapter-neon)
+DIRECT_URL=             # Neon 直连串(迁移用,可同 DATABASE_URL)
+NEXTAUTH_SECRET=        # openssl rand -base64 32
+NEXTAUTH_URL=           # https://<worker子域或自定义域>
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+ATLASCLOUD_API_KEY=
+STRIPE_SECRET_KEY=      # 不用 Stripe 可留空 + PAYMENT_PROVIDER=atlas
+STRIPE_WEBHOOK_SECRET=
+PAYMENT_PROVIDER=atlas

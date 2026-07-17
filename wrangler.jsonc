@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "atlas-saas-starter",
+  "account_id": "92b017b13672c5120ab016025f8f4a84",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "r2_buckets": [
+    { "bucket_name": "marketing-studio-media", "binding": "MEDIA_BUCKET" }
+  ],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "atlas-saas-db", "database_id": "e7629b36-a082-4f66-bb98-83db9a039626" }
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
