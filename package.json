@@ -1,8 +1,8 @@
 {
-  "name": "atlas-saas-starter",
+  "name": "atlas-marketing-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "Open-source, one-click-deployable AI video SaaS starter powered by Atlas Cloud. Bring your own Stripe (or Atlas credits), deploy to Vercel, keep the revenue.",
+  "description": "Atlas Marketing Studio is an open-source AI e-commerce ad studio for generating UGC product ads, reference-ad remakes, AI drama ads, and ad skits with Atlas Cloud multi-model workflows.",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
