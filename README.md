@@ -1,6 +1,6 @@
 # Atlas Marketing Studio
 
-**[Marketing Studio](https://atlas-marketing-studio.vercel.app)** is an open-source AI e-commerce ad studio for generating UGC product ads, reference-ad remakes, AI drama ads, and short ad skits, powered by [Atlas Cloud](https://www.atlascloud.ai?utm_source=github&utm_campaign=atlas-marketing-studio).
+**[Marketing Studio](https://atlas-saas-starter.atlascloudai.workers.dev/)** is an open-source AI e-commerce ad studio for generating UGC product ads, reference-ad remakes, AI drama ads, and short ad skits, powered by [Atlas Cloud](https://www.atlascloud.ai?utm_source=github&utm_campaign=atlas-marketing-studio).
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
@@ -13,7 +13,7 @@
 
 ## What this project is
 
-[Marketing Studio](https://atlas-marketing-studio.vercel.app) is a self-hostable AI ad generator for e-commerce teams, agencies, and builders, powered by [Atlas Cloud](https://www.atlascloud.ai?utm_source=github&utm_campaign=atlas-marketing-studio). It turns product photos, presenter images, product links, prompts, or reference ads into ready-to-use video ad concepts.
+[Marketing Studio](https://atlas-saas-starter.atlascloudai.workers.dev/) is a self-hostable AI ad generator for e-commerce teams, agencies, and builders, powered by [Atlas Cloud](https://www.atlascloud.ai?utm_source=github&utm_campaign=atlas-marketing-studio). It turns product photos, presenter images, product links, prompts, or reference ads into ready-to-use video ad concepts.
 
 This is not a generic AI SaaS starter. It is a real, runnable e-commerce creative studio with opinionated workflows for:
 
@@ -32,10 +32,10 @@ Demo links use the hosted app path. If you self-host, keep the same paths on you
 
 | Workflow | What it does | Use it for | Models | Try it |
 |---|---|---|---|---|
-| **UGC Product Ad** | Product + presenter photos -> lip-synced UGC ad | An **AI UGC ad generator** or **product-to-video ad generator** for product reviews, creator testimonials, direct-response e-commerce ads, and social ad variations. | Atlas Cloud prompt expansion, `nano-banana/edit` first frame, `seedance-2.0` image-to-video | [Open UGC Product Ad](https://atlas-marketing-studio.vercel.app/marketing-studio) |
-| **Reference to Ad** | Upload a viral ad -> remake it with your product and presenter | A **reference ad remake AI workflow** for adapting proven ad structure, talent framing, and product placement to your own offer. | `gemini-omni-flash/video-edit`, optional ElevenLabs TTS, optional `veed/lipsync`, fallback to `kling motion-control` | [Open Reference to Ad](https://atlas-marketing-studio.vercel.app/ad-reference) |
-| **AI Drama Ad** | One topic -> comedy script -> shot-by-shot drama ad | An **AI short drama ad generator** for social commerce, story-led e-commerce ads, and short-form video campaigns. | Atlas Cloud LLM script generation, reference image generation, `seedance-2.0/reference-to-video` per shot | [Open AI Drama Ad](https://atlas-marketing-studio.vercel.app/drama-studio) |
-| **Ad Skit** | One-line product -> two-person comedy skit | A **short ad skit generator** for creator ads, TikTok-style product jokes, hook testing, and fast creative iteration. | Atlas Cloud LLM script generation, `gpt-image-2` product shot, `seedance-2.0/reference-to-video` with audio | [Open Ad Skit](https://atlas-marketing-studio.vercel.app/ad-skit) |
+| **UGC Product Ad** | Product + presenter photos -> lip-synced UGC ad | An **AI UGC ad generator** or **product-to-video ad generator** for product reviews, creator testimonials, direct-response e-commerce ads, and social ad variations. | Atlas Cloud prompt expansion, `nano-banana/edit` first frame, `seedance-2.0` image-to-video | [Open UGC Product Ad](https://atlas-saas-starter.atlascloudai.workers.dev/marketing-studio) |
+| **Reference to Ad** | Upload a viral ad -> remake it with your product and presenter | A **reference ad remake AI workflow** for adapting proven ad structure, talent framing, and product placement to your own offer. | `gemini-omni-flash/video-edit`, optional ElevenLabs TTS, optional `veed/lipsync`, fallback to `kling motion-control` | [Open Reference to Ad](https://atlas-saas-starter.atlascloudai.workers.dev/ad-reference) |
+| **AI Drama Ad** | One topic -> comedy script -> shot-by-shot drama ad | An **AI short drama ad generator** for social commerce, story-led e-commerce ads, and short-form video campaigns. | Atlas Cloud LLM script generation, reference image generation, `seedance-2.0/reference-to-video` per shot | [Open AI Drama Ad](https://atlas-saas-starter.atlascloudai.workers.dev/drama-studio) |
+| **Ad Skit** | One-line product -> two-person comedy skit | A **short ad skit generator** for creator ads, TikTok-style product jokes, hook testing, and fast creative iteration. | Atlas Cloud LLM script generation, `gpt-image-2` product shot, `seedance-2.0/reference-to-video` with audio | [Open Ad Skit](https://atlas-saas-starter.atlascloudai.workers.dev/ad-skit) |
 
 All workflows auto-detect the input language. Write the product brief in English, Chinese, or another language, and the generated script/ad follows that language.
 
