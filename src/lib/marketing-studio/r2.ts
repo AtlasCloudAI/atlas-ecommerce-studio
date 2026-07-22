@@ -60,10 +60,21 @@ export async function persistToR2(sourceUrl: string): Promise<string> {
     const bucket = (env as unknown as { MEDIA_BUCKET?: R2BucketLike }).MEDIA_BUCKET;
     if (!bucket) return sourceUrl;
     // 后端 fetch 不受浏览器 CORS/force-download 限制;不带 Referer 绕过 OSS 防盗链。
-    const res = await fetch(sourceUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store' });
-    if (!res.ok) return sourceUrl;
-    const buf = await res.arrayBuffer();
-    const media = sniffMedia(buf, res.headers.get('content-type') || 'application/octet-stream');
+    // 下载兜底超时:视频可能十几 MB,若 Atlas OSS 偶发慢,别把 /poll 拖过 maxDuration(60s)被平台强杀
+    // ——那样前端会收到网关错误、误判成 transient,任务明明已 completed 却一直转圈到 poll_gateway_unstable。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45_000);
+    let buf: ArrayBuffer;
+    let declaredType: string;
+    try {
+      const res = await fetch(sourceUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store', signal: controller.signal });
+      if (!res.ok) return sourceUrl;
+      declaredType = res.headers.get('content-type') || 'application/octet-stream';
+      buf = await res.arrayBuffer();
+    } finally {
+      clearTimeout(timer);
+    }
+    const media = sniffMedia(buf, declaredType);
     const key = `${crypto.randomUUID()}.${media.extension}`;
     await bucket.put(key, buf, { httpMetadata: { contentType: media.contentType } });
     return `/api/marketing-studio/media/${key}`;

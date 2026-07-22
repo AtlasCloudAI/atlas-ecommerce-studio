@@ -1,5 +1,6 @@
 'use client';
 import { byokHeaders, useByokActive } from '@/lib/byok';
+import { pollGen } from '@/lib/poll-client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession, signIn } from 'next-auth/react';
@@ -79,39 +80,7 @@ function imageToDataUrl(file: File): Promise<string> {
     r.readAsDataURL(file);
   });
 }
-function pollGen(getUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let n = 0;
-    let transientErrors = 0;
-    let lastError = '';
-    const t = setInterval(async () => {
-      n += 1;
-      if (n > 300) { clearInterval(t); reject(new Error('timeout')); return; }
-      try {
-        const c = await postJson('/api/marketing-studio/poll', { getUrl });
-        // transient=true:Atlas 状态查询网关瞬时超时(504),任务多半还在跑;计数不清零,连续太多次才放弃(避免静默转圈到超时)。
-        if (c.transient) {
-          transientErrors += 1;
-          if (transientErrors >= 8) { clearInterval(t); reject(new Error('poll_gateway_unstable')); }
-          return;
-        }
-        transientErrors = 0;
-        if (c.status === 'completed') {
-          const o = (Array.isArray(c.outputs) ? c.outputs : [])[0];
-          clearInterval(t);
-          o ? resolve(o) : reject(new Error('empty_output'));
-        } else if (c.status === 'failed') { clearInterval(t); reject(new Error(c.error || 'failed')); }
-      } catch (e) {
-        transientErrors += 1;
-        lastError = String((e as Error).message || e).slice(0, 240);
-        if (transientErrors >= 8) {
-          clearInterval(t);
-          reject(new Error(lastError || 'poll_failed'));
-        }
-      }
-    }, 3000);
-  });
-}
+// pollGen 已抽到 @/lib/poll-client(健壮版:串行轮询 + 退避 + 高瞬时容忍),marketing/drama/ad-reference 共用。
 
 export default function DramaStudioPage() {
   const { status } = useSession();

@@ -1,5 +1,6 @@
 'use client';
 import { byokHeaders, useByokActive } from '@/lib/byok';
+import { pollGen } from '@/lib/poll-client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -51,36 +52,7 @@ function adErrText(msg: string, locale: string) {
   return msg;
 }
 
-// 代理轮询 Atlas 任务(无数据库):复用 marketing-studio 的 /poll(完成自动转存 R2)。
-function pollGen(getUrl: string, timeoutMs = 480_000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const t0 = Date.now();
-    let transientErrors = 0;
-    let lastError = '';
-    const t = setInterval(async () => {
-      if (Date.now() - t0 > timeoutMs) { clearInterval(t); reject(new Error(lastError || 'Generation timed out, please try again')); return; }
-      try {
-        const c = await postJson('/api/marketing-studio/poll', { getUrl });
-        // transient=true:Atlas 状态查询网关瞬时超时(504),任务多半还在跑;计数不清零,连续太多次才放弃(避免静默转圈到超时)。
-        if (c.transient) {
-          transientErrors += 1;
-          if (transientErrors >= 8) { clearInterval(t); reject(new Error(lastError || 'poll_gateway_unstable')); }
-          return;
-        }
-        transientErrors = 0;
-        if (c.status === 'completed' && c.outputs?.length) { clearInterval(t); resolve(c.outputs[0]); }
-        if (c.status === 'failed') { clearInterval(t); reject(new Error(String(c.error || 'Generation failed').slice(0, 200))); }
-      } catch (e) {
-        transientErrors += 1;
-        lastError = String((e as Error).message || e).slice(0, 240);
-        if (transientErrors >= 8) {
-          clearInterval(t);
-          reject(new Error(lastError || 'Polling failed'));
-        }
-      }
-    }, 5000);
-  });
-}
+// pollGen 已抽到 @/lib/poll-client(健壮版:串行轮询 + 退避 + 高瞬时容忍),marketing/drama/ad-reference 共用。
 
 async function uploadFile(file: File): Promise<string> {
   const form = new FormData();
@@ -238,7 +210,7 @@ export default function AdReferencePage() {
     for (let i = 0; i <= retries; i++) {
       try {
         const r = await postJson(url, body);
-        return await pollGen(r.getUrl, pollTimeout);
+        return await pollGen(r.getUrl, { timeoutMs: pollTimeout });
       } catch (e) {
         last = e;
         const m = String((e as Error)?.message || e);
