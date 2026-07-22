@@ -1,22 +1,23 @@
-// 玩法卡片的预览视频(玩法 id → 同源 R2 媒体 url,可内联播放、不过期)。
-// 由 multiref-demo/gen_examples.py 生成 → 转存到 R2 bucket marketing-studio-media(key: ex-<id>.mp4)。
+// 玩法卡片的预览视频(玩法 id → 同源静态资源 url)。
+// 由 multiref-demo/gen_examples.py 生成 → 转存到 R2,并同时落盘到 public/examples/marketing/ex-<id>.mp4,
+// 让仓库自包含:clone/本地部署无需连 R2 也能看到 showcase。
 export const EXAMPLE_VIDEOS: Record<string, string> = {
-  ugc: '/api/marketing-studio/media/ex-ugc.mp4',
-  'direct-to-camera': '/api/marketing-studio/media/ex-direct-to-camera.mp4',
-  'selfie-testimonial': '/api/marketing-studio/media/ex-selfie-testimonial.mp4',
-  'gadget-saved-me': '/api/marketing-studio/media/ex-gadget-saved-me.mp4',
-  'secret-hack': '/api/marketing-studio/media/ex-secret-hack.mp4',
-  review: '/api/marketing-studio/media/ex-review.mp4',
-  unboxing: '/api/marketing-studio/media/ex-unboxing.mp4',
-  'unboxing-asmr': '/api/marketing-studio/media/ex-unboxing-asmr.mp4',
-  'try-on': '/api/marketing-studio/media/ex-try-on.mp4',
-  'couple-sharing': '/api/marketing-studio/media/ex-couple-sharing.mp4',
-  tvspot: '/api/marketing-studio/media/ex-tvspot.mp4',
-  hypermotion: '/api/marketing-studio/media/ex-hypermotion.mp4',
-  'giant-product': '/api/marketing-studio/media/ex-giant-product.mp4',
-  'crush-test': '/api/marketing-studio/media/ex-crush-test.mp4',
-  'camera-pov': '/api/marketing-studio/media/ex-camera-pov.mp4',
-  'mess-to-fresh': '/api/marketing-studio/media/ex-mess-to-fresh.mp4',
+  ugc: '/examples/marketing/ex-ugc.mp4',
+  'direct-to-camera': '/examples/marketing/ex-direct-to-camera.mp4',
+  'selfie-testimonial': '/examples/marketing/ex-selfie-testimonial.mp4',
+  'gadget-saved-me': '/examples/marketing/ex-gadget-saved-me.mp4',
+  'secret-hack': '/examples/marketing/ex-secret-hack.mp4',
+  review: '/examples/marketing/ex-review.mp4',
+  unboxing: '/examples/marketing/ex-unboxing.mp4',
+  'unboxing-asmr': '/examples/marketing/ex-unboxing-asmr.mp4',
+  'try-on': '/examples/marketing/ex-try-on.mp4',
+  'couple-sharing': '/examples/marketing/ex-couple-sharing.mp4',
+  tvspot: '/examples/marketing/ex-tvspot.mp4',
+  hypermotion: '/examples/marketing/ex-hypermotion.mp4',
+  'giant-product': '/examples/marketing/ex-giant-product.mp4',
+  'crush-test': '/examples/marketing/ex-crush-test.mp4',
+  'camera-pov': '/examples/marketing/ex-camera-pov.mp4',
+  'mess-to-fresh': '/examples/marketing/ex-mess-to-fresh.mp4',
 };
 
 // ── 一键复刻配方(对齐 Higgsfield:产品图 @product + 人物图 @avatar 双参考 + 一大段详细 prompt)──
