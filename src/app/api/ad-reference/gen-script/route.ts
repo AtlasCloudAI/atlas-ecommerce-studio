@@ -35,7 +35,7 @@ async function __byokPOST(req: Request) {
   if (avatarImg) parts.push({ type: 'image_url', image_url: { url: avatarImg } });
 
   try {
-    const raw = await atlasChat([{ role: 'system', content: sys }, { role: 'user', content: parts }], MODEL, 800, 55000);
+    const raw = await atlasChat([{ role: 'system', content: sys }, { role: 'user', content: parts }], MODEL, null, 55000);
     const script = (raw || '').trim().replace(/^```[a-z]*\n?|\n?```$/g, '').replace(/^["“”']|["“”']$/g, '').trim();
     if (!script) return NextResponse.json({ error: 'empty_output' }, { status: 502 });
     return NextResponse.json({ script });

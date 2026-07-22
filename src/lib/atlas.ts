@@ -316,7 +316,7 @@ export interface ChatMessage {
 export async function atlasChat(
   messages: ChatMessage[],
   model = DEFAULT_CHAT_MODEL,
-  maxTokens = 900,
+  maxTokens: number | null = 900,
   timeoutMs = CHAT_TIMEOUT_MS,
 ): Promise<string> {
   const controller = new AbortController();
@@ -334,7 +334,9 @@ export async function atlasChat(
         model,
         messages,
         temperature: 0.7,
-        max_tokens: maxTokens,
+        // maxTokens=null → 不传 max_tokens,让模型用默认上限。带 thinking 的模型(gemini-2.5)
+        // 若上限太小,推理会先吃掉预算、正文被 length 截断(见 ad-reference 口播台词/marketing 扩写被截)。
+        ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
         stream: false,
       }),
       cache: 'no-store',
