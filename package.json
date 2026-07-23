@@ -9,6 +9,7 @@
     "build": "npm run prisma:generate && npm run platform:prepare && next build",
     "build:vercel": "DEPLOY_TARGET=vercel npm run build",
     "start": "next start",
+    "test": "node --test --experimental-strip-types --no-warnings test/**/*.test.ts",
     "lint": "next lint",
     "postinstall": "npm run prisma:generate && npm run platform:prepare",
     "prisma:generate": "node scripts/generate-prisma-clients.mjs",

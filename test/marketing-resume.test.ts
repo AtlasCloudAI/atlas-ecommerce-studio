@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { planTaskResume } from '../src/lib/marketing-studio/resume.ts';
+
+test('a new generation charges both image and video submissions', () => {
+  assert.deepEqual(planTaskResume(undefined, 5, 76), {
+    hasExistingWork: false,
+    hasPendingTask: false,
+    needsImageSubmission: true,
+    needsVideoSubmission: true,
+    remainingCost: 81,
+  });
+});
+
+test('an accepted image task is polled without charging the image again', () => {
+  const plan = planTaskResume({ imgGetUrl: 'image-task' }, 5, 76);
+  assert.equal(plan.hasPendingTask, true);
+  assert.equal(plan.needsImageSubmission, false);
+  assert.equal(plan.needsVideoSubmission, true);
+  assert.equal(plan.remainingCost, 76);
+});
+
+test('an accepted video task resumes with zero additional credits', () => {
+  const plan = planTaskResume({
+    imgUrl: '/media/image.png',
+    vidGetUrl: 'video-task',
+  }, 5, 76);
+  assert.equal(plan.hasPendingTask, true);
+  assert.equal(plan.needsImageSubmission, false);
+  assert.equal(plan.needsVideoSubmission, false);
+  assert.equal(plan.remainingCost, 0);
+});
+
+test('a refunded terminal video failure reuses the completed image', () => {
+  const plan = planTaskResume({ imgUrl: '/media/image.png' }, 5, 76);
+  assert.equal(plan.hasPendingTask, false);
+  assert.equal(plan.needsImageSubmission, false);
+  assert.equal(plan.needsVideoSubmission, true);
+  assert.equal(plan.remainingCost, 76);
+});

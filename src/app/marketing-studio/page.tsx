@@ -12,6 +12,12 @@ import { AD_SETTINGS, getSetting } from '@/lib/marketing-studio/settings';
 import { AVATAR_PRESETS, getAvatar } from '@/lib/marketing-studio/avatars';
 import { EXAMPLE_VIDEOS, EXAMPLE_RECIPES } from '@/lib/marketing-studio/examples';
 import type { MarketingPlan } from '@/lib/marketing-studio/schema';
+import {
+  PollInterruptedError,
+  PollTerminalError,
+  pollUntilComplete,
+} from '@/lib/marketing-studio/polling';
+import { planTaskResume } from '@/lib/marketing-studio/resume';
 import { videoCredits } from '@/lib/video-pricing';
 import { useI18n } from '@/i18n/provider';
 
@@ -25,8 +31,13 @@ const COSTS = { plan: 3, image: 5, video: 12 };
 // 视频模型:seedance-2.0/image-to-video(prompt 带台词 + generate_audio 即对口型,单步最便宜),与后端 REPLICA_VIDEO_MODEL 白名单一致
 const REPLICA_VIDEO_MODEL = 'bytedance/seedance-2.0/image-to-video';
 
-async function postJson(url: string, body: unknown) {
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...byokHeaders() }, body: JSON.stringify(body) });
+async function postJson(url: string, body: unknown, signal?: AbortSignal) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...byokHeaders() },
+    body: JSON.stringify(body),
+    signal,
+  });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.detail ? `${j.error || 'error'}: ${j.detail}` : (j.error || 'failed'));
   return j;
@@ -39,39 +50,14 @@ function imageToDataUrl(file: File): Promise<string> {
     r.readAsDataURL(file);
   });
 }
-// 代理轮询 Atlas 任务(无数据库):后端 /poll 用 key 查 getUrl 状态并回传。
-function pollGen(getUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let n = 0;
-    let transientErrors = 0;
-    let lastError = '';
-    const t = setInterval(async () => {
-      n += 1;
-      if (n > 300) { clearInterval(t); reject(new Error('timeout')); return; }
-      try {
-        const c = await postJson('/api/marketing-studio/poll', { getUrl });
-        // transient=true:Atlas 状态查询网关瞬时超时(504),任务多半还在跑;计数不清零,连续太多次才放弃(避免静默转圈到超时)。
-        if (c.transient) {
-          transientErrors += 1;
-          if (transientErrors >= 8) { clearInterval(t); reject(new Error('poll_gateway_unstable')); }
-          return;
-        }
-        transientErrors = 0;
-        if (c.status === 'completed') {
-          const output = (Array.isArray(c.outputs) ? c.outputs : [])[0];
-          clearInterval(t);
-          output ? resolve(output) : reject(new Error('empty_output'));
-        }
-        else if (c.status === 'failed') { clearInterval(t); reject(new Error(c.error || 'failed')); }
-      } catch (e) {
-        transientErrors += 1;
-        lastError = String((e as Error).message || e).slice(0, 240);
-        if (transientErrors >= 8) {
-          clearInterval(t);
-          reject(new Error(lastError || 'poll_failed'));
-        }
-      }
-    }, 3000);
+// 代理轮询 Atlas 任务。必须串行查询:单次服务端查询最长 25s,用 setInterval 会堆出并发请求,
+// 把一次网关波动放大成 poll_gateway_unstable。瞬时错误自动退避,只在任务真实失败时终止。
+function pollGen(getUrl: string, signal: AbortSignal, onTransient: () => void): Promise<string> {
+  return pollUntilComplete({
+    getUrl,
+    signal,
+    request: (taskUrl, requestSignal) => postJson('/api/marketing-studio/poll', { getUrl: taskUrl }, requestSignal),
+    onTransient,
   });
 }
 function errText(code: string, locale: string) {
@@ -85,12 +71,16 @@ function errText(code: string, locale: string) {
   if (code === 'product_required') return zh ? '请先填写产品描述或上传产品图片。' : 'Please add a product description or upload a product image first.';
   if (code === 'image_too_large') return zh ? '图片太大了,请压缩到 8MB 以内。' : 'Image is too large. Please compress it to under 8MB.';
   if (code === 'not_image') return zh ? '请上传图片文件。' : 'Please upload an image file';
+  if (code === 'poll_temporarily_unavailable') return zh ? '任务仍在后台运行,状态查询暂时不可用。点「继续查询」不会重复扣费。' : 'The task is still running, but status lookup is temporarily unavailable. Continue checking without another charge.';
   if (code === 'video_failed' || code === 'empty_output' || code === 'generation failed' || code === 'failed') return zh ? '生成失败了,请点重试;若反复失败,可能是内容触发了审核或额度不足。' : 'Generation failed — please retry; if it persists it may be a content-safety block or low credits.';
   return zh ? `出错了:${code}(可点重试)` : `Something went wrong: ${code} (try again)`;
 }
 
 // imgGetUrl/vidGetUrl = Atlas 任务查询地址:提交后立刻持久化,刷新/中断后凭它恢复轮询,不重复提交扣费。
-type ShotState = { img: 'idle' | 'run' | 'done' | 'fail'; vid: 'idle' | 'run' | 'done' | 'fail'; imgUrl?: string; vidUrl?: string; imgGetUrl?: string; vidGetUrl?: string };
+type StepStatus = 'idle' | 'run' | 'paused' | 'done' | 'fail';
+type ShotState = { img: StepStatus; vid: StepStatus; imgUrl?: string; vidUrl?: string; imgGetUrl?: string; vidGetUrl?: string };
+type ComposeState = { status: 'idle' | 'run' | 'paused' | 'done' | 'fail'; frac: number; note: string; url: string };
+type ResumeSnapshot = { shot: ShotState; creationId: string };
 // 生成进度持久化 key:plan/视频状态存 localStorage,刷新或切页回来自动恢复现场、断点续跑。
 const MK_SESSION_KEY = 'mk-session-v1';
 type Asset = { preview?: string; url?: string; uploading?: boolean };
@@ -159,14 +149,17 @@ export default function MarketingStudioPage() {
   const [shots, setShots] = useState<ShotState[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [compose, setCompose] = useState<{ status: 'idle' | 'run' | 'done' | 'fail'; frac: number; note: string; url: string }>({ status: 'idle', frac: 0, note: '', url: '' });
+  const [compose, setCompose] = useState<ComposeState>({ status: 'idle', frac: 0, note: '', url: '' });
   const [preview, setPreview] = useState<string | null>(null);
   const [credits, setCredits] = useState<number | null>(null);
   const [creationId, setCreationId] = useState(''); // 点生成时创建的"作品占位"id,完成/失败时更新它
+  const [sessionHydrated, setSessionHydrated] = useState(false);
+  const [resumeSnapshot, setResumeSnapshot] = useState<ResumeSnapshot | null>(null);
   const [replica, setReplica] = useState<{ imgPrompt: string } | null>(null); // 非空=复刻模式(视频提示词已填入文本框可编辑),存出图专用构图 prompt
   const [expanding, setExpanding] = useState(false); // AI 扩写提示词中
   const productInput = useRef<HTMLInputElement>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
+  const runAbortRef = useRef<AbortController | null>(null);
 
   const fmt = useMemo(() => AD_FORMATS.find((f) => f.id === formatId) || AD_FORMATS[0], [formatId]);
   const visibleFormats = useMemo(() => (category === 'all' ? AD_FORMATS : AD_FORMATS.filter((f) => f.category === category)), [category]);
@@ -207,8 +200,8 @@ export default function MarketingStudioPage() {
   }, [status, refreshCredits]);
 
   // ── 生成进度持久化:刷新/切页不丢现场 ──
-  // 恢复(mounted 后一次):24h 内的会话恢复 plan/视频状态;中断时的 'run' 归一为 'idle',
-  // 已存 getUrl 的步骤续跑时直接恢复轮询(不重新提交、不重复扣费)。
+  // 恢复(mounted 后一次):24h 内的会话恢复 plan/视频状态。只要保存了 getUrl,
+  // 刷新后就继续轮询同一 Atlas 任务,绝不重新提交或重复扣费。
   useEffect(() => {
     if (!mounted) return;
     try {
@@ -230,27 +223,48 @@ export default function MarketingStudioPage() {
       if (VIDEO_RESOLUTIONS.includes(s.videoResolution)) setVideoResolution(s.videoResolution);
       if (VIDEO_DURATIONS.includes(s.videoDuration)) setVideoDuration(s.videoDuration);
       if (VIDEO_RATIOS.includes(s.videoRatio)) setVideoRatio(s.videoRatio);
-      // plan/shots 仅在确有已生成内容时恢复(断点续跑);中断的 'run' 归一为 'idle'
+      const restoredCreationId = typeof s.creationId === 'string' ? s.creationId : '';
+      if (restoredCreationId) setCreationId(restoredCreationId);
+      // plan/shots 仅在确有已生成内容时恢复。未完成步骤保留 getUrl 并标为 paused,
+      // 下一次 effect 直接恢复查询;旧实现清掉 getUrl 会导致重提任务和重复扣费。
       if (s.plan?.shots?.length) {
         setPlan(s.plan);
         const first = Array.isArray(s.shots) && s.shots[0] ? s.shots[0] : { img: 'idle', vid: 'idle' };
-        // 未完成的镜清掉 getUrl,续跑重新提交,不轮询可能已过期的旧任务(否则"点生成没调 Atlas")
-        const imgDone = first.img === 'done' && !!first.imgUrl;
-        const vidDone = first.vid === 'done' && !!first.vidUrl;
-        setShots([{
-          img: imgDone ? 'done' : 'idle', vid: vidDone ? 'done' : 'idle',
-          imgUrl: imgDone ? first.imgUrl : undefined, vidUrl: vidDone ? first.vidUrl : undefined,
-          imgGetUrl: imgDone ? first.imgGetUrl : undefined, vidGetUrl: vidDone ? first.vidGetUrl : undefined,
-        }]);
+        const imgUrl = typeof first.imgUrl === 'string' ? first.imgUrl : undefined;
+        const vidUrl = typeof first.vidUrl === 'string' ? first.vidUrl : undefined;
+        const imgGetUrl = typeof first.imgGetUrl === 'string' ? first.imgGetUrl : undefined;
+        const vidGetUrl = typeof first.vidGetUrl === 'string' ? first.vidGetUrl : undefined;
+        const imgDone = !!imgUrl;
+        const vidDone = !!vidUrl;
+        const restoredShot: ShotState = {
+          img: imgDone ? 'done' : imgGetUrl ? 'paused' : 'idle',
+          vid: vidDone ? 'done' : vidGetUrl ? 'paused' : 'idle',
+          imgUrl,
+          vidUrl,
+          imgGetUrl,
+          vidGetUrl,
+        };
+        setShots([restoredShot]);
+        if (vidDone) {
+          setCompose({ status: 'done', frac: 1, note: 'Done', url: vidUrl });
+        } else if (imgGetUrl || vidGetUrl) {
+          setCompose({
+            status: 'run',
+            frac: vidGetUrl ? 0.55 : 0.2,
+            note: locale === 'zh' ? '正在恢复原任务' : 'Resuming existing task',
+            url: '',
+          });
+          setResumeSnapshot({ shot: restoredShot, creationId: restoredCreationId });
+        }
       }
-      if (typeof s.creationId === 'string') setCreationId(s.creationId);
     } catch { /* ignore broken session */ }
+    finally { setSessionHydrated(true); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
   // 保存:plan/视频状态每次变化都落 localStorage(imgUrl/vidUrl 是 R2 同源地址,持久可播)。
   useEffect(() => {
-    if (!mounted) return; // 不再要求有 plan:只填了输入(还没生成)也存,登录 OAuth 跳转回来才不丢
+    if (!mounted || !sessionHydrated) return; // 等恢复 effect 完成,避免首个空状态覆盖尚未读出的任务
     try {
       localStorage.setItem(MK_SESSION_KEY, JSON.stringify({
         plan, shots, product, formatId, hookId, settingId, avatarId, replica,
@@ -259,7 +273,18 @@ export default function MarketingStudioPage() {
         ts: Date.now(),
       }));
     } catch { /* storage full etc. */ }
-  }, [mounted, plan, shots, product, formatId, hookId, settingId, avatarId, replica, videoRatio, videoResolution, videoDuration, creationId, productAssets, avatarAsset.url]);
+  }, [mounted, sessionHydrated, plan, shots, product, formatId, hookId, settingId, avatarId, replica, videoRatio, videoResolution, videoDuration, creationId, productAssets, avatarAsset.url]);
+
+  useEffect(() => () => runAbortRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!sessionHydrated || !resumeSnapshot) return;
+    const snapshot = resumeSnapshot;
+    setResumeSnapshot(null);
+    void genDirectVideo(snapshot.shot, snapshot.creationId);
+    // 恢复快照只消费一次;genDirectVideo 使用恢复完成后的当前表单/plan 状态。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionHydrated, resumeSnapshot]);
 
   async function onPick(kind: 'product' | 'avatar', file?: File | null) {
     if (!file) return;
@@ -333,70 +358,105 @@ export default function MarketingStudioPage() {
     }
   }
 
-  async function genDirectVideo() {
-    if (status !== 'authenticated') { signIn('google'); return; }
-    if (!product.trim() && !productAssets.some((a) => a.url)) { setErr('product_required'); return; }
+  async function genDirectVideo(existing?: ShotState, existingCreationId = '') {
+    const resumePlan = planTaskResume(existing, COSTS.image, videoCost);
+    const { hasExistingWork, hasPendingTask, remainingCost } = resumePlan;
+    if (!hasExistingWork && status !== 'authenticated') { signIn('google'); return; }
+    if (!hasExistingWork && !product.trim() && !productAssets.some((a) => a.url)) { setErr('product_required'); return; }
     if (productAssets.some((a) => a.uploading) || avatarAsset.uploading) return;
+    runAbortRef.current?.abort();
+    const controller = new AbortController();
+    runAbortRef.current = controller;
+
     // 场景/钩子下拉 → 注入 prompt 占位(both 复刻/普通模式生效):场景进画面(出图+视频),钩子进视频开场
     const settingRecipe = getSetting(settingId).recipe; // 英文场景描述(空=智能自选)
     const hookEn = getHook(hookId).promptEn || ''; // 英文开场钩子指令
     const sceneAdd = settingRecipe ? ` The whole scene is set in ${settingRecipe}.` : '';
     const hookAdd = hookEn ? ` Opening hook in the first 3 seconds: ${hookEn}.` : '';
-    const directPlan = buildDirectMarketingPlan({ prompt: product.trim() || '产品视频', ratio: videoRatio, formatId, scene: settingRecipe || undefined });
-    const local: ShotState = { img: 'idle', vid: 'idle' };
+    const directPlan = hasExistingWork && plan
+      ? plan
+      : buildDirectMarketingPlan({ prompt: product.trim() || '产品视频', ratio: videoRatio, formatId, scene: settingRecipe || undefined });
+    const local: ShotState = existing ? { ...existing } : { img: 'idle', vid: 'idle' };
     setErr(null);
     setBusy('video');
     setPlan(directPlan);
     setShots([local]);
-    setCreationId('');
-    setCompose({ status: 'run', frac: 0.05, note: locale === 'zh' ? '准备生成' : 'Preparing', url: '' });
-    let cid = '';
+    setCompose({
+      status: 'run',
+      frac: local.vidGetUrl ? 0.55 : local.imgGetUrl ? 0.2 : 0.05,
+      note: hasPendingTask
+        ? (locale === 'zh' ? '继续查询原任务' : 'Continuing existing task')
+        : (locale === 'zh' ? '准备生成' : 'Preparing'),
+      url: '',
+    });
+    let cid = existingCreationId || creationId;
+    const onTransient = () => {
+      if (controller.signal.aborted) return;
+      setCompose((current) => ({
+        ...current,
+        note: locale === 'zh' ? '上游查询波动,正在自动恢复…' : 'Status lookup is unstable; recovering automatically…',
+      }));
+    };
+
     try {
-      const currentCredits = await refreshCredits();
-      if (!byokActive && currentCredits !== null && currentCredits < shotCost) {
-        setErr(`insufficient_credits:${shotCost}:${currentCredits}`);
+      const currentCredits = remainingCost > 0 ? await refreshCredits() : credits;
+      if (!byokActive && currentCredits !== null && currentCredits < remainingCost) {
+        setErr(`insufficient_credits:${remainingCost}:${currentCredits}`);
         setCompose({ status: 'idle', frac: 0, note: '', url: '' });
-        setBusy(null);
         return;
       }
-      // 作品页立刻出现"生成中"这条作品:没有占位就创建一条(续跑时复用已有的)
-      try {
-        const st = await postJson('/api/creations/start', { type: 'marketing-studio', title: directPlan.title || product.slice(0, 60) || '产品广告' });
-        cid = st.id;
-        setCreationId(cid);
-      } catch { /* 占位失败不阻断生成 */ }
 
-      setCompose({ status: 'run', frac: 0.15, note: locale === 'zh' ? '生成首帧' : 'Generating first frame', url: '' });
-      local.img = 'run';
-      setShots([{ ...local }]);
-      const im = await postJson('/api/marketing-studio/shot-image', {
-        plan: directPlan,
-        shotIndex: 0,
-        productUrls: productAssets.map((a) => a.url).filter(Boolean),
-        avatarUrl: avatarAsset.url || '',
-        promptOverride: (replica ? replica.imgPrompt : product.trim()) + sceneAdd, // 出图 prompt:复刻用配方构图,手动/扩写用文本框内容
-      });
-      local.imgGetUrl = im.getUrl;
-      setShots([{ ...local }]);
-      const imgUrl = await pollGen(local.imgGetUrl!);
-      local.img = 'done';
-      local.imgUrl = imgUrl;
-      setShots([{ ...local }]);
+      // 新任务或真正失败后的重新生成才建占位;已有 getUrl 的恢复查询不新建、不扣费。
+      if (!cid && !hasPendingTask) {
+        try {
+          const st = await postJson('/api/creations/start', { type: 'marketing-studio', title: directPlan.title || product.slice(0, 60) || '产品广告' }, controller.signal);
+          cid = st.id;
+          setCreationId(cid);
+        } catch { /* 占位失败不阻断生成 */ }
+      }
 
-      setCompose({ status: 'run', frac: 0.48, note: locale === 'zh' ? '生成视频' : 'Generating video', url: '' });
-      local.vid = 'run';
-      setShots([{ ...local }]);
-      const vd = await postJson('/api/marketing-studio/shot-video', {
-        imageUrl: imgUrl,
-        prompt: product.trim() + sceneAdd + hookAdd + ' No subtitles, no captions, no on-screen text or watermark.', // 视频 prompt = 文本框内容 + 场景 + 钩子;明确禁字幕(seedance 常自动烧字幕)
-        ratio: directPlan.ratio,
-        resolution: videoResolution,
-        duration: videoDuration,
-        model: REPLICA_VIDEO_MODEL, // 统一 seedance-2.0 i2v(prompt 带台词 + generate_audio):复刻和手动扩写都能对口型出口播
-      });
-      local.vidGetUrl = vd.getUrl;
-      setShots([{ ...local }]);
-      const vidUrl = await pollGen(local.vidGetUrl!);
+      let imgUrl = local.imgUrl || '';
+      // 已经有视频任务时绝不回头重做首帧;轮询视频本身不再需要 imageUrl。
+      if (!local.vidGetUrl && !local.vidUrl && !imgUrl) {
+        setCompose({ status: 'run', frac: 0.15, note: locale === 'zh' ? '生成首帧' : 'Generating first frame', url: '' });
+        local.img = 'run';
+        setShots([{ ...local }]);
+        if (!local.imgGetUrl) {
+          const im = await postJson('/api/marketing-studio/shot-image', {
+            plan: directPlan,
+            shotIndex: 0,
+            productUrls: productAssets.map((a) => a.url).filter(Boolean),
+            avatarUrl: avatarAsset.url || '',
+            promptOverride: (replica ? replica.imgPrompt : product.trim()) + sceneAdd, // 出图 prompt:复刻用配方构图,手动/扩写用文本框内容
+          }, controller.signal);
+          local.imgGetUrl = im.getUrl;
+          setShots([{ ...local }]);
+        }
+        imgUrl = await pollGen(local.imgGetUrl!, controller.signal, onTransient);
+        local.img = 'done';
+        local.imgUrl = imgUrl;
+        setShots([{ ...local }]);
+      }
+
+      let vidUrl = local.vidUrl || '';
+      if (!vidUrl) {
+        setCompose({ status: 'run', frac: 0.48, note: locale === 'zh' ? '生成视频' : 'Generating video', url: '' });
+        local.vid = 'run';
+        setShots([{ ...local }]);
+        if (!local.vidGetUrl) {
+          const vd = await postJson('/api/marketing-studio/shot-video', {
+            imageUrl: imgUrl,
+            prompt: product.trim() + sceneAdd + hookAdd + ' No subtitles, no captions, no on-screen text or watermark.', // 视频 prompt = 文本框内容 + 场景 + 钩子;明确禁字幕(seedance 常自动烧字幕)
+            ratio: directPlan.ratio,
+            resolution: videoResolution,
+            duration: videoDuration,
+            model: REPLICA_VIDEO_MODEL, // 统一 seedance-2.0 i2v(prompt 带台词 + generate_audio):复刻和手动扩写都能对口型出口播
+          }, controller.signal);
+          local.vidGetUrl = vd.getUrl;
+          setShots([{ ...local }]);
+        }
+        vidUrl = await pollGen(local.vidGetUrl!, controller.signal, onTransient);
+      }
       local.vid = 'done';
       local.vidUrl = vidUrl;
       setShots([{ ...local }]);
@@ -410,22 +470,42 @@ export default function MarketingStudioPage() {
           type: 'marketing-studio',
           thumbnail: imgUrl,
           creationId: cid,
-        });
+        }, controller.signal);
       } catch { /* ignore history save failure */ }
       setCreationId(''); // 本条已完成,下次点生成再建新占位
       setReplica(null); // 复刻完成,退出复刻模式
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'video_failed');
-      local.img = local.img === 'run' ? 'fail' : local.img;
-      local.vid = local.vid === 'run' ? 'fail' : local.vid;
+      if (controller.signal.aborted) return;
+      const message = e instanceof Error ? e.message : 'video_failed';
+      const recoverable = e instanceof PollInterruptedError;
+      const terminal = e instanceof PollTerminalError;
+      setErr(recoverable ? 'poll_temporarily_unavailable' : message);
+      const activeStep = local.vid === 'run' ? 'vid' : local.img === 'run' ? 'img' : null;
+      if (activeStep) local[activeStep] = recoverable ? 'paused' : 'fail';
+      // Atlas 明确返回 failed 时该步骤已经退款;清掉旧 getUrl,下次才允许重新提交该步骤。
+      // 网关/浏览器中断则必须保留 getUrl,让"继续查询"和刷新恢复同一个已扣费任务。
+      if (terminal && activeStep === 'img') local.imgGetUrl = undefined;
+      if (terminal && activeStep === 'vid') local.vidGetUrl = undefined;
       setShots([{ ...local }]);
-      setCompose((c) => (c.status === 'run' ? { ...c, status: 'fail', note: errText(e instanceof Error ? e.message : 'video_failed', locale) } : c));
-      // 作品页把这条占位标记为"失败"(而不是永远转圈)
-      if (cid) fetch(`/api/creations/${cid}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...byokHeaders() }, body: JSON.stringify({ status: 'failed', error: e instanceof Error ? e.message : 'video_failed' }) }).catch(() => {});
-      setCreationId('');
+      setCompose((current) => current.status === 'run'
+        ? {
+            ...current,
+            status: recoverable ? 'paused' : 'fail',
+            note: errText(recoverable ? 'poll_temporarily_unavailable' : message, locale),
+          }
+        : current);
+      if (!recoverable) {
+        // 只有确定失败才把作品占位标为 failed;查询波动时保持 processing。
+        if (cid) fetch(`/api/creations/${cid}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...byokHeaders() }, body: JSON.stringify({ status: 'failed', error: message }) }).catch(() => {});
+        setCreationId('');
+      }
+    } finally {
+      if (runAbortRef.current === controller) {
+        runAbortRef.current = null;
+        setBusy(null);
+        window.dispatchEvent(new Event('atlas:credits'));
+      }
     }
-    setBusy(null);
-    window.dispatchEvent(new Event('atlas:credits'));
   }
 
   const gridBg = {
@@ -517,7 +597,7 @@ export default function MarketingStudioPage() {
               </div>
             </div>
             {/* GENERATE(通高) */}
-            <button onClick={genDirectVideo} disabled={busy !== null || productAssets.some((a) => a.uploading) || avatarAsset.uploading || !hasCreditsForVideo}
+            <button onClick={() => void genDirectVideo()} disabled={busy !== null || productAssets.some((a) => a.uploading) || avatarAsset.uploading || !hasCreditsForVideo}
               className="self-stretch px-6 rounded-2xl font-extrabold text-sm flex flex-col items-center justify-center gap-1.5 disabled:opacity-50 transition hover:brightness-105 shrink-0"
               style={{ background: `radial-gradient(90% 90% at 50% 120%, #a78bfa 0%, rgba(167,139,250,0) 60%), ${LIME}`, color: '#fff' }}>
               {busy === 'video' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Video className="w-5 h-5" />}
@@ -543,8 +623,14 @@ export default function MarketingStudioPage() {
         <div className="max-w-md mx-auto px-4 pb-16">
           <div className="rounded-3xl border border-white/10 p-5 shadow-[0_24px_80px_-28px_rgba(112,54,240,0.55)]" style={{ background: PANEL }}>
             <div className="flex items-center gap-2 text-sm mb-3">
-              {compose.status === 'done' ? <CheckCircle2 className="w-4 h-4" style={{ color: LIME }} /> : compose.status === 'fail' ? <AlertCircle className="w-4 h-4 text-red-400" /> : <Loader2 className="w-4 h-4 animate-spin" style={{ color: LIME }} />}
-              <b>{compose.status === 'done' ? (locale === 'zh' ? '视频已就绪' : 'Video ready') : compose.status === 'fail' ? (locale === 'zh' ? '生成失败' : 'Generation failed') : (locale === 'zh' ? '生成中' : 'Generating')}</b>
+              {compose.status === 'done' ? <CheckCircle2 className="w-4 h-4" style={{ color: LIME }} /> : compose.status === 'fail' || compose.status === 'paused' ? <AlertCircle className={`w-4 h-4 ${compose.status === 'paused' ? 'text-amber-300' : 'text-red-400'}`} /> : <Loader2 className="w-4 h-4 animate-spin" style={{ color: LIME }} />}
+              <b>{compose.status === 'done'
+                ? (locale === 'zh' ? '视频已就绪' : 'Video ready')
+                : compose.status === 'paused'
+                  ? (locale === 'zh' ? '任务仍在后台运行' : 'Task still running')
+                  : compose.status === 'fail'
+                    ? (locale === 'zh' ? '生成失败' : 'Generation failed')
+                    : (locale === 'zh' ? '生成中' : 'Generating')}</b>
               <span className="ml-auto text-xs text-white/40 truncate max-w-[45%]">{compose.note}</span>
             </div>
             {compose.status === 'run' && (
@@ -555,10 +641,10 @@ export default function MarketingStudioPage() {
                 </div>
               </>
             )}
-            {compose.status === 'fail' && (
-              <div className="rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-300 text-center">
+            {(compose.status === 'fail' || compose.status === 'paused') && (
+              <div className={`rounded-2xl border p-4 text-sm text-center ${compose.status === 'paused' ? 'border-amber-400/25 bg-amber-400/10 text-amber-200' : 'border-red-500/25 bg-red-500/10 text-red-300'}`}>
                 <div className="mb-3 leading-relaxed">{compose.note || (locale === 'zh' ? '生成失败,请重试' : 'Generation failed, please retry')}</div>
-                <button onClick={genDirectVideo} disabled={busy !== null} className="inline-flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl transition hover:brightness-110 disabled:opacity-50" style={{ background: LIME, color: '#131517' }}>{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}{locale === 'zh' ? '重试' : 'Retry'}</button>
+                <button onClick={() => void genDirectVideo(shots[0], creationId)} disabled={busy !== null} className="inline-flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl transition hover:brightness-110 disabled:opacity-50" style={{ background: LIME, color: '#131517' }}>{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}{compose.status === 'paused' ? (locale === 'zh' ? '继续查询' : 'Continue checking') : (locale === 'zh' ? '重试生成' : 'Retry generation')}</button>
               </div>
             )}
             {compose.url && (
@@ -569,7 +655,7 @@ export default function MarketingStudioPage() {
                 <p className="mt-2 text-[11px] text-white/35">{locale === 'zh' ? '点视频右下角开声音听口播 🔊' : 'Tap the video volume to hear the voiceover 🔊'}</p>
                 <div className="mt-2 flex items-center gap-2">
                   <a href={compose.url} download="ad.mp4" className="inline-flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl text-white transition hover:brightness-110" style={{ background: LIME }}><Download className="w-4 h-4" />{locale === 'zh' ? '下载视频' : 'Download'}</a>
-                  <button onClick={genDirectVideo} disabled={busy !== null} className="inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl border border-white/15 hover:border-[#7036F0] disabled:opacity-50 transition">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}{locale === 'zh' ? '再生成一个' : 'Regenerate'}</button>
+                  <button onClick={() => void genDirectVideo()} disabled={busy !== null} className="inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl border border-white/15 hover:border-[#7036F0] disabled:opacity-50 transition">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}{locale === 'zh' ? '再生成一个' : 'Regenerate'}</button>
                 </div>
               </div>
             )}
