@@ -74,7 +74,7 @@ model Creation {
   model      String
   prompt     String  
   inputImage String? 
-  status     String   @default("pending") // pending | processing | completed | failed
+  status     String   @default("pending") // pending | processing | persisting | completed | failed
   taskId     String?
   getUrl     String? 
   outputs    Json?

@@ -3,7 +3,9 @@ import { NextResponse } from 'next/server';
 import { pollOnce } from '@/lib/atlas';
 import { persistToR2 } from '@/lib/marketing-studio/r2';
 import {
+  claimTaskCompletion,
   completedTaskOutputs,
+  releaseTaskCompletionClaim,
   refundFailedTask,
   markTaskCompleted,
 } from '@/lib/marketing-studio/gen-task';
@@ -49,8 +51,20 @@ async function __byokPOST(req: Request) {
     return NextResponse.json({ error: 'poll_failed', detail: msg }, { status: 502 });
   }
   // 查询成功后的转存/落库/退款:出错不当"生成失败";completed 尽量把产出交付,落库失败仅记日志。
+  let completionClaimed = false;
   try {
     if (r.status === 'completed' && r.outputs?.length) {
+      const claim = await claimTaskCompletion(getUrl);
+      if (claim.kind === 'completed') {
+        return NextResponse.json({ status: 'completed', outputs: claim.outputs, cached: true });
+      }
+      if (claim.kind === 'failed') {
+        return NextResponse.json({ status: 'failed', outputs: [], error: 'refunded' });
+      }
+      if (claim.kind === 'waiting') {
+        return NextResponse.json({ status: 'processing', outputs: [], transient: true });
+      }
+      completionClaimed = claim.kind === 'claimed';
       const outputs = await Promise.all(r.outputs.map((u) => persistToR2(u)));
       const delivered = await markTaskCompleted(getUrl, outputs);
       if (!delivered) return NextResponse.json({ status: 'failed', outputs: [], error: 'refunded' });
@@ -63,6 +77,10 @@ async function __byokPOST(req: Request) {
     }
     return NextResponse.json({ status: r.status, outputs: r.outputs, error: r.error });
   } catch (e) {
+    if (completionClaimed) {
+      try { await releaseTaskCompletionClaim(getUrl); }
+      catch (releaseError) { console.error('[marketing/poll] completion claim release failed:', String(releaseError)); }
+    }
     console.error('[marketing/poll] post-process error:', String(e));
     if (r.status === 'completed' && r.outputs?.length) return NextResponse.json({ status: 'completed', outputs: r.outputs });
     return NextResponse.json({ status: r.status, outputs: r.outputs || [], error: r.error });

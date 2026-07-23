@@ -121,6 +121,74 @@ export async function completedTaskOutputs(getUrl: string): Promise<string[] | n
   return outputs.length ? outputs : null;
 }
 
+export type CompletionClaim =
+  | { kind: 'claimed' }
+  | { kind: 'completed'; outputs: string[] }
+  | { kind: 'failed' }
+  | { kind: 'waiting' }
+  | { kind: 'untracked' };
+
+/**
+ * 原子认领 completed 结果的转存权。多个标签页可能同时看到 Atlas completed;
+ * 只有第一个 processing → persisting 成功的请求可以写对象存储,其它请求等待缓存。
+ */
+export async function claimTaskCompletion(getUrl: string): Promise<CompletionClaim> {
+  if (!getUrl) return { kind: 'untracked' };
+  const creation = await prisma.creation.findFirst({ where: { getUrl } });
+  if (!creation) return { kind: 'untracked' };
+
+  const existingOutputs = taskOutputUrls(creation.outputs);
+  if (creation.status === 'completed' && existingOutputs.length) {
+    return { kind: 'completed', outputs: existingOutputs };
+  }
+  if (creation.status === 'failed') return { kind: 'failed' };
+
+  let claimed = false;
+  if (creation.status === 'processing' || creation.status === 'completed') {
+    const update = await prisma.creation.updateMany({
+      where: { id: creation.id, status: creation.status },
+      data: { status: 'persisting' },
+    });
+    claimed = update.count === 1;
+  } else if (
+    creation.status === 'persisting'
+    && Date.now() - new Date(creation.updatedAt).getTime() > 2 * 60_000
+  ) {
+    // 上一个转存请求可能被平台强杀。2 分钟租约到期后允许一个请求原子接管。
+    const update = await prisma.creation.updateMany({
+      where: {
+        id: creation.id,
+        status: 'persisting',
+        updatedAt: { lte: new Date(Date.now() - 2 * 60_000) },
+      },
+      data: { status: 'persisting' },
+    });
+    claimed = update.count === 1;
+  }
+  if (claimed) return { kind: 'claimed' };
+
+  // 另一请求正在转存。短暂等候其写入缓存;仍未完成则让客户端稍后继续轮询。
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const current = await prisma.creation.findUnique({ where: { id: creation.id } });
+    if (!current) return { kind: 'untracked' };
+    const outputs = taskOutputUrls(current.outputs);
+    if (current.status === 'completed' && outputs.length) {
+      return { kind: 'completed', outputs };
+    }
+    if (current.status === 'failed') return { kind: 'failed' };
+  }
+  return { kind: 'waiting' };
+}
+
+export async function releaseTaskCompletionClaim(getUrl: string): Promise<void> {
+  if (!getUrl) return;
+  await prisma.creation.updateMany({
+    where: { getUrl, status: 'persisting' },
+    data: { status: 'processing' },
+  });
+}
+
 /**
  * poll 发现任务完成时把 processing 记录标记为 completed(幂等,按 getUrl 定位)并保存可播放输出。
  * 返回是否"可交付":若该任务已是 failed 终态(已退款),返回 false,poll 据此拒绝把成片下发给客户端,
