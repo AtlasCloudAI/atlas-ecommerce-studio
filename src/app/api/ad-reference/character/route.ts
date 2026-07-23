@@ -6,59 +6,18 @@ import {
   AD_REF_CHARACTER_MODEL,
   submitAdRefCharacter,
 } from '@/lib/ad-reference';
-import { uploadBlobToAtlas, uploadRemoteMediaToAtlas } from '@/lib/atlas';
+import { uploadInputMediaToAtlas } from '@/lib/ad-reference-media';
 import { chargeAndSubmit, chargeErrorResponse } from '@/lib/marketing-studio/gen-task';
 import { videoCredits } from '@/lib/video-pricing';
-import { getCloudflareContext } from '@opennextjs/cloudflare';
-import { NonPublicMediaUrlError, sameOriginMediaPath, toAtlasMediaUrl } from '@/lib/public-media-url';
+import {
+  NonPublicMediaUrlError,
+  toAtlasMediaUrl,
+} from '@/lib/public-media-url';
 
 export const maxDuration = 60;
 
 const WAN_IMAGE_LIMIT = 5_000_000;
 const WAN_VIDEO_LIMIT = 200_000_000;
-const MEDIA_PATH_PREFIX = '/api/marketing-studio/media/';
-
-function extensionForContentType(contentType: string): string {
-  const ct = contentType.toLowerCase();
-  if (ct.includes('jpeg') || ct.includes('jpg')) return 'jpg';
-  if (ct.includes('png')) return 'png';
-  if (ct.includes('webp')) return 'webp';
-  if (ct.includes('bmp')) return 'bmp';
-  if (ct.includes('mp4')) return 'mp4';
-  if (ct.includes('quicktime')) return 'mov';
-  if (ct.includes('avi')) return 'avi';
-  return 'bin';
-}
-
-async function uploadSameOriginMediaToAtlas(path: string, filenamePrefix: string, maxBytes: number): Promise<string> {
-  const key = decodeURIComponent(path.slice(MEDIA_PATH_PREFIX.length).split('?')[0] || '');
-  if (!key) throw new Error('media_key_required');
-  const { env } = getCloudflareContext();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const bucket = (env as any).MEDIA_BUCKET;
-  if (!bucket) throw new Error('bucket_not_bound');
-  const obj = await bucket.get(key);
-  if (!obj) throw new Error(`media_not_found:${key}`);
-  const buffer = await obj.arrayBuffer();
-  if (buffer.byteLength > maxBytes) throw new Error(`media_too_large:${buffer.byteLength}`);
-  const contentType = obj.httpMetadata?.contentType || 'application/octet-stream';
-  return uploadBlobToAtlas(
-    new Blob([buffer], { type: contentType }),
-    `${filenamePrefix}.${extensionForContentType(contentType)}`,
-  );
-}
-
-async function uploadInputMediaToAtlas(
-  rawValue: unknown,
-  publicUrl: string,
-  req: Request,
-  filenamePrefix: string,
-  maxBytes: number,
-): Promise<string> {
-  const path = sameOriginMediaPath(rawValue, req);
-  if (path) return uploadSameOriginMediaToAtlas(path, filenamePrefix, maxBytes);
-  return uploadRemoteMediaToAtlas(publicUrl, filenamePrefix, maxBytes);
-}
 
 // Wan-2.2 Character Swap 不稳定接受 Workers/R2 URL,所以先上传到 Atlas 临时媒体 URL 再提交。
 async function __byokPOST(req: Request) {

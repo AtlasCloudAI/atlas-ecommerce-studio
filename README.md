@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-f38020)](https://workers.cloudflare.com/)
+[![Vercel](https://img.shields.io/badge/Vercel-ready-black)](https://vercel.com/)
 [![Powered by Atlas Cloud](https://img.shields.io/badge/powered%20by-Atlas%20Cloud-6d5dfc)](https://www.atlascloud.ai?utm_source=github&utm_campaign=atlas-marketing-studio)
 
 > Most AI video tools generate a clip. Atlas Marketing Studio gives you the ad workflow around it: product input, script, shots, reference assets, video generation, credits, login, and deployment.
@@ -55,8 +56,9 @@ All workflows auto-detect the input language. Write the product brief in English
 - Dynamic video credit pricing based on duration, model, and resolution
 - Google login with NextAuth
 - Stripe checkout or Atlas redeem-code top-ups
-- Prisma data layer with Cloudflare-compatible deployment
-- OpenNext build target for Cloudflare Workers
+- Build-selected Prisma adapters: Cloudflare D1 or Neon Postgres
+- Build-selected media storage: Cloudflare R2 or Public Vercel Blob
+- Native Vercel build plus OpenNext target for Cloudflare Workers
 - Public media URL handling for model APIs that need fetchable assets
 - MIT license for learning, forking, and self-hosting
 
@@ -66,15 +68,28 @@ All workflows auto-detect the input language. Write the product brief in English
 git clone https://github.com/AtlasCloudAI/atlas-marketing-studio.git
 cd atlas-marketing-studio
 npm install
-cp .dev.vars.example .dev.vars
 ```
 
-Fill the required values in `.dev.vars`:
+For a Vercel-compatible local Next.js runtime:
 
 ```bash
+cp .env.example .env
+# Fill Neon, Public Vercel Blob, auth, and Atlas Cloud values.
+npm run dev:vercel
+```
+
+For Cloudflare/OpenNext preview:
+
+```bash
+cp .dev.vars.example .dev.vars
+# D1 and R2 come from wrangler.jsonc bindings.
+npm run cf:preview
+```
+
+Core application variables:
+
+```env
 ATLASCLOUD_API_KEY=
-DATABASE_URL=
-DIRECT_URL=
 NEXTAUTH_SECRET=
 NEXTAUTH_URL=http://localhost:3000
 GOOGLE_CLIENT_ID=
@@ -82,31 +97,25 @@ GOOGLE_CLIENT_SECRET=
 PAYMENT_PROVIDER=atlas
 ```
 
-Optional Stripe checkout variables:
+Platform resources:
 
-```bash
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-```
+| Platform | Database | Media storage |
+|---|---|---|
+| Cloudflare | D1 binding `DB` | R2 binding `MEDIA_BUCKET` |
+| Vercel | `DATABASE_URL` for Neon Postgres | Public Blob via `BLOB_READ_WRITE_TOKEN` |
 
 Where to get each value:
 
 | Variable | Where to get it | Notes |
 |---|---|---|
 | `ATLASCLOUD_API_KEY` | [Atlas Cloud API Keys](https://www.atlascloud.ai/docs/api-keys) | Create an Atlas Cloud API key for image, video, LLM, TTS, and lip-sync generation. API keys are shown once, so store it safely. |
-| `DATABASE_URL` | [Neon connection string](https://neon.com/docs/connect/connect-from-any-app) | Use the pooled Neon Postgres connection string for the app runtime. |
-| `DIRECT_URL` | [Neon direct connection](https://neon.com/docs/connect/connect-from-any-app) | Use the direct Neon Postgres connection string for Prisma migrations. It can be the same project/database as `DATABASE_URL`. |
+| `DATABASE_URL` | [Neon connection string](https://neon.com/docs/connect/connect-from-any-app) | Vercel only. Use the pooled Neon Postgres connection string. |
+| `BLOB_READ_WRITE_TOKEN` | Vercel project Storage | Vercel only. Connect a **Public** Blob store; Vercel injects the token. |
 | `NEXTAUTH_SECRET` | [NextAuth secret](https://next-auth.js.org/configuration/options#nextauth_secret) | Generate locally with `openssl rand -base64 32`. |
 | `GOOGLE_CLIENT_ID` | [Google Cloud OAuth clients](https://console.cloud.google.com/auth/clients) | Create a Web application OAuth client for Google sign-in. |
 | `GOOGLE_CLIENT_SECRET` | [Google Cloud OAuth clients](https://console.cloud.google.com/auth/clients) | Copy the client secret from the same Web application OAuth client. |
 | `STRIPE_SECRET_KEY` | [Stripe API keys](https://dashboard.stripe.com/apikeys) | Optional. Required only when `PAYMENT_PROVIDER=stripe`. Use test keys for local development. |
-| `STRIPE_WEBHOOK_SECRET` | [Stripe Webhooks](https://dashboard.stripe.com/webhooks) | Optional. Required for Stripe webhook verification in production. Local webhook secrets can also come from `stripe listen`. |
-
-Then run the app:
-
-```bash
-npm run dev
-```
+| `STRIPE_WEBHOOK_SECRET` | [Stripe Webhooks](https://dashboard.stripe.com/webhooks) | Optional. Required for Stripe webhook verification in production. |
 
 Open [http://localhost:3000](http://localhost:3000).
 
@@ -114,13 +123,17 @@ Get an Atlas Cloud API key at [Atlas Cloud](https://www.atlascloud.ai?utm_source
 
 ## Deploy
 
-Use the same environment variables from Quick start for both deployment paths.
+The same business code targets two infrastructure stacks. `VERCEL=1`
+automatically selects Neon/Blob during Vercel builds; `cf:*` scripts explicitly
+select D1/R2.
 
 ### Deploy to Vercel
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FAtlasCloudAI%2Fatlas-marketing-studio&env=ATLASCLOUD_API_KEY,DATABASE_URL,DIRECT_URL,NEXTAUTH_SECRET,NEXTAUTH_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,PAYMENT_PROVIDER&envDescription=Atlas%20Cloud%20API%20key%2C%20Neon%20database%20URLs%2C%20NextAuth%20secret%2C%20Google%20OAuth%20credentials%2C%20and%20payment%20provider&project-name=atlas-marketing-studio&repository-name=atlas-marketing-studio)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FAtlasCloudAI%2Fatlas-marketing-studio&env=ATLASCLOUD_API_KEY,DATABASE_URL,BLOB_READ_WRITE_TOKEN,NEXTAUTH_SECRET,NEXTAUTH_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,PAYMENT_PROVIDER&envDescription=Atlas%20Cloud%20key%2C%20Neon%20database%2C%20Public%20Vercel%20Blob%2C%20NextAuth%2C%20Google%20OAuth%2C%20and%20payment%20provider&project-name=atlas-marketing-studio&repository-name=atlas-marketing-studio)
 
-Vercel is the fastest path for a standard Next.js deployment. Import the repository, add the environment variables from Quick start, and deploy.
+Create/connect a Neon database and a **Public** Vercel Blob store, initialize
+the Neon schema with `npm run db:push:vercel`, then deploy with the standard
+`npm run build` command.
 
 ### Deploy to Cloudflare Workers
 
@@ -128,17 +141,20 @@ Vercel is the fastest path for a standard Next.js deployment. Import the reposit
 npm run cf:deploy
 ```
 
-For Cloudflare, set production secrets with Wrangler or the Cloudflare dashboard:
+Cloudflare uses the `DB` D1 binding and `MEDIA_BUCKET` R2 binding in
+`wrangler.jsonc`; it does not use `DATABASE_URL` or `BLOB_READ_WRITE_TOKEN`.
+Set application secrets with Wrangler or the dashboard:
 
 ```bash
 wrangler secret put ATLASCLOUD_API_KEY
-wrangler secret put DATABASE_URL
 wrangler secret put NEXTAUTH_SECRET
 wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
 ```
 
-Secrets should never be committed to the repository.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for resource creation, database
+initialization, legacy R2 compatibility, verification commands, and data
+migration boundaries.
 
 ## Credits and pricing
 

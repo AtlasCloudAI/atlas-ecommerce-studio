@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useSession, signIn } from 'next-auth/react';
 import { useI18n } from '@/i18n/provider';
 import { useMounted } from '@/lib/use-mounted';
+import { uploadDirectMediaIfSupported } from '@/lib/client-media-upload';
 import { videoCredits } from '@/lib/video-pricing';
 
 // 爆款广告复刻(Ad Reference):粘贴一条爆款广告 → 换成你的产品/出镜人/声音,同 hook 同能量。
@@ -83,6 +84,12 @@ function pollGen(getUrl: string, timeoutMs = 480_000): Promise<string> {
 }
 
 async function uploadFile(file: File): Promise<string> {
+  const directUrl = await uploadDirectMediaIfSupported(file, {
+    kind: 'ad-reference',
+    filename: file.name,
+  });
+  if (directUrl) return directUrl;
+
   const form = new FormData();
   form.append('file', file);
   const r = await fetch('/api/ad-reference/upload', { method: 'POST', headers: byokHeaders(), body: form });

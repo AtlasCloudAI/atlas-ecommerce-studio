@@ -2,8 +2,11 @@ import { withAtlas } from '@/lib/request-context';
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { AD_REF_MAX_VIDEO_BYTES, AD_REF_MAX_IMAGE_BYTES } from '@/lib/ad-reference';
+import {
+  MediaStorageNotConfiguredError,
+  putMedia,
+} from '@/lib/media-storage';
 
 export const maxDuration = 60;
 
@@ -59,14 +62,15 @@ async function __byokPOST(req: Request) {
   if (buffer.byteLength > max) return NextResponse.json({ error: 'file_too_large', maxBytes: max }, { status: 400 });
 
   try {
-    const { env } = getCloudflareContext();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bucket = (env as any).MEDIA_BUCKET;
-    if (!bucket) return NextResponse.json({ error: 'bucket_not_bound' }, { status: 500 });
     const key = `adref-${crypto.randomUUID()}.${ext}`;
-    await bucket.put(key, buffer, { httpMetadata: { contentType: ct } });
-    return NextResponse.json({ url: `/api/marketing-studio/media/${key}` });
+    return NextResponse.json({ url: await putMedia(key, buffer, ct) });
   } catch (e) {
+    if (e instanceof MediaStorageNotConfiguredError) {
+      return NextResponse.json(
+        { error: 'media_storage_not_configured' },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ error: 'upload_failed', detail: String(e) }, { status: 502 });
   }
 }

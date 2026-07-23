@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import {
+  isManagedMediaUrl,
+  MediaStorageNotConfiguredError,
+  putMedia,
+} from '@/lib/media-storage';
 import { prisma } from '@/lib/prisma';
-import { getCloudflareContext } from '@opennextjs/cloudflare';
 
 export const maxDuration = 60;
 
@@ -14,13 +18,18 @@ export async function POST(req: Request) {
     const contentType = req.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const body = await req.json().catch(() => ({}));
-      const reelUrl = typeof body.url === 'string' && body.url.startsWith('/api/marketing-studio/media/') ? body.url : '';
+      const reelUrl = isManagedMediaUrl(body.url) ? String(body.url) : '';
       if (!reelUrl) return NextResponse.json({ error: 'invalid_url' }, { status: 400 });
       const title = String(body.title || 'Untitled').slice(0, 500);
       const type = String(body.type || 'marketing-studio');
       const thumbnail = String(body.thumbnail || '') || null;
       const creationId = String(body.creationId || '');
-      const outputs = [reelUrl];
+      const shots = Array.isArray(body.shots)
+        ? body.shots.filter(
+            (value: unknown): value is string => typeof value === 'string',
+          )
+        : [];
+      const outputs = [reelUrl, ...shots];
 
       if (creationId) {
         const upd = await prisma.creation.updateMany({
@@ -47,13 +56,9 @@ export async function POST(req: Request) {
     const file = form.get('file');
     if (!(file instanceof Blob)) return NextResponse.json({ error: 'no_file' }, { status: 400 });
     const buf = await file.arrayBuffer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bucket = (getCloudflareContext().env as any).MEDIA_BUCKET;
-    if (!bucket) return NextResponse.json({ error: 'no_bucket' }, { status: 500 });
 
     const key = `reel-${crypto.randomUUID()}.mp4`;
-    await bucket.put(key, buf, { httpMetadata: { contentType: 'video/mp4' } });
-    const reelUrl = `/api/marketing-studio/media/${key}`;
+    const reelUrl = await putMedia(key, buf, 'video/mp4');
 
     const title = String(form.get('title') || 'Untitled').slice(0, 500);
     const type = String(form.get('type') || 'marketing-studio');
@@ -84,6 +89,12 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ id: creation.id, url: reelUrl });
   } catch (e) {
+    if (e instanceof MediaStorageNotConfiguredError) {
+      return NextResponse.json(
+        { error: 'no_media_storage' },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ error: 'save_failed', detail: String(e) }, { status: 502 });
   }
 }

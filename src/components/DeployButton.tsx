@@ -5,9 +5,9 @@ import { Rocket, X } from 'lucide-react';
 import { useI18n } from '@/i18n/provider';
 
 const REPO = 'https://github.com/AtlasCloudAI/atlas-marketing-studio';
-const ENV_VARS = 'ATLASCLOUD_API_KEY,DATABASE_URL,DIRECT_URL,NEXTAUTH_SECRET,NEXTAUTH_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,PAYMENT_PROVIDER';
-const ENV_DESC = 'Atlas Cloud API key, Neon database URLs, NextAuth secret, Google OAuth credentials, and payment provider (see .dev.vars.example)';
-const ENV_LINK = `${REPO}/blob/main/.dev.vars.example`;
+const ENV_VARS = 'ATLASCLOUD_API_KEY,DATABASE_URL,BLOB_READ_WRITE_TOKEN,NEXTAUTH_SECRET,NEXTAUTH_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,PAYMENT_PROVIDER';
+const ENV_DESC = 'Atlas Cloud key, Neon database, public Vercel Blob token, NextAuth, Google OAuth, and payment provider (see .env.example)';
+const ENV_LINK = `${REPO}/blob/main/.env.example`;
 
 const VERCEL_URL =
   `https://vercel.com/new/clone?repository-url=${encodeURIComponent(REPO)}` +
@@ -41,14 +41,14 @@ export function DeployButton() {
             <div className="space-y-3">
               <a href={VERCEL_URL} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-[#7036F0]/60 hover:bg-white/[0.06] transition">
                 <span className="text-2xl font-black leading-none">▲</span>
-                <div><div className="font-semibold">{zh ? '部署到 Vercel' : 'Deploy to Vercel'}</div><div className="text-xs text-white/45">{zh ? 'Next.js 原生托管,最快,含自动 CI' : 'Native Next.js hosting, fastest, auto CI'}</div></div>
+                <div><div className="font-semibold">{zh ? '部署到 Vercel' : 'Deploy to Vercel'}</div><div className="text-xs text-white/45">{zh ? 'Next.js + Neon + Public Blob' : 'Next.js + Neon + Public Blob'}</div></div>
               </a>
               <a href={CF_URL} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-[#7036F0]/60 hover:bg-white/[0.06] transition">
                 <span className="text-2xl leading-none">☁️</span>
-                <div><div className="font-semibold">{zh ? '部署到 Cloudflare' : 'Deploy to Cloudflare'}</div><div className="text-xs text-white/45">{zh ? 'Workers 全球边缘,免费额度大' : 'Workers global edge, generous free tier'}</div></div>
+                <div><div className="font-semibold">{zh ? '部署到 Cloudflare' : 'Deploy to Cloudflare'}</div><div className="text-xs text-white/45">{zh ? 'Workers + D1 + R2' : 'Workers + D1 + R2'}</div></div>
               </a>
             </div>
-            <p className="text-[11px] text-white/30 mt-4">{zh ? '部署后在平台填入环境变量(Atlas Cloud key / 数据库 / Google OAuth),详见 ' : 'After deploying, set env vars (Atlas Cloud key / database / Google OAuth) on the platform — see '}<a href={ENV_LINK} target="_blank" rel="noopener noreferrer" className="underline hover:text-white/60">.dev.vars.example</a></p>
+            <p className="text-[11px] text-white/30 mt-4">{zh ? 'Vercel 需 Neon + Public Blob；Cloudflare 需 D1 + R2 bindings。详见 ' : 'Vercel needs Neon + Public Blob; Cloudflare needs D1 + R2 bindings. See '}<a href={ENV_LINK} target="_blank" rel="noopener noreferrer" className="underline hover:text-white/60">.env.example</a></p>
           </div>
         </div>
       )}

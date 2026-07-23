@@ -1,6 +1,6 @@
 import { uploadBlobToAtlas, uploadRemoteMediaToAtlas } from '@/lib/atlas';
+import { readMedia } from '@/lib/media-storage';
 import { sameOriginMediaPath } from '@/lib/public-media-url';
-import { getCloudflareContext } from '@opennextjs/cloudflare';
 
 // 同源 R2 媒体(/api/marketing-studio/media/<key>)不能让 Atlas 走公网 URL 自抓——
 // Worker 自抓自己的 R2 路由在 CF 环境里会 404,Atlas 侧再抓就变成 1042 / "参数无效"。
@@ -26,18 +26,14 @@ function extensionForContentType(contentType: string): string {
 async function uploadSameOriginMediaToAtlas(path: string, filenamePrefix: string, maxBytes: number): Promise<string> {
   const key = decodeURIComponent(path.slice(MEDIA_PATH_PREFIX.length).split('?')[0] || '');
   if (!key) throw new Error('media_key_required');
-  const { env } = getCloudflareContext();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const bucket = (env as any).MEDIA_BUCKET;
-  if (!bucket) throw new Error('bucket_not_bound');
-  const obj = await bucket.get(key);
-  if (!obj) throw new Error(`media_not_found:${key}`);
-  const buffer = await obj.arrayBuffer();
-  if (buffer.byteLength > maxBytes) throw new Error(`media_too_large:${buffer.byteLength}`);
-  const contentType = obj.httpMetadata?.contentType || 'application/octet-stream';
+  const media = await readMedia(path);
+  if (!media) throw new Error(`media_not_found:${key}`);
+  if (media.buffer.byteLength > maxBytes) {
+    throw new Error(`media_too_large:${media.buffer.byteLength}`);
+  }
   return uploadBlobToAtlas(
-    new Blob([buffer], { type: contentType }),
-    `${filenamePrefix}.${extensionForContentType(contentType)}`,
+    new Blob([media.buffer], { type: media.contentType }),
+    `${filenamePrefix}.${extensionForContentType(media.contentType)}`,
   );
 }
 

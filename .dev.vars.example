@@ -1,7 +1,6 @@
-# 本地 cf:preview 用(wrangler 读 .dev.vars);生产用 `wrangler secret put <KEY>`。
-# 复制为 .dev.vars 并填值(勿提交 .dev.vars)。
-DATABASE_URL=            # Neon 连接串(必须 neon,queryCompiler+adapter-neon)
-DIRECT_URL=             # Neon 直连串(迁移用,可同 DATABASE_URL)
+# Cloudflare 本地 cf:preview 使用（Wrangler 读取 .dev.vars）。
+# D1 和 R2 由 wrangler.jsonc bindings 提供，不需要 DATABASE_URL/Blob token。
+# 生产环境请用 `wrangler secret put <KEY>`，不要提交 .dev.vars。
 NEXTAUTH_SECRET=        # openssl rand -base64 32
 NEXTAUTH_URL=           # https://<worker子域或自定义域>
 GOOGLE_CLIENT_ID=

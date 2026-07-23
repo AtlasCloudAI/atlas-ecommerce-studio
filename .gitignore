@@ -8,6 +8,9 @@ build
 .DS_Store
 prisma/dev.db
 prisma/dev.db-journal
+prisma/.generated/
+src/generated/prisma/
+src/generated/platform/
 next-env.d.ts
 .vercel
 .open-next
@@ -18,6 +21,7 @@ TEAM_SYNC.md
 APP_SPECS.md
 VERIFICATION.md
 .env*
+!.env.example
 APP_IDEAS.md
 ATLAS_MODELS.md
 model-capabilities.json

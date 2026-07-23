@@ -4,6 +4,7 @@ import { byokHeaders, useByokActive } from '@/lib/byok';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession, signIn } from 'next-auth/react';
 import { AlertCircle, CheckCircle2, Download, Film, ImagePlus, Loader2, Pencil, RefreshCw, Video, Wand2, X } from 'lucide-react';
+import { uploadDirectMediaIfSupported } from '@/lib/client-media-upload';
 import { composeAdReel } from '@/lib/compose-client';
 import { DRAMA_STYLES } from '@/lib/drama/prompt';
 import { videoCredits } from '@/lib/video-pricing';
@@ -577,14 +578,30 @@ export default function DramaStudioPage() {
       const blob = await composeAdReel(vidUrls, (p) => setCompose((c) => ({ ...c, status: 'run', frac: p.frac, note: p.note })));
       setCompose({ status: 'done', frac: 1, note: locale === 'zh' ? '完成' : 'Done', url: URL.createObjectURL(blob) });
       try {
-        const fd = new FormData();
-        fd.append('file', blob, 'reel.mp4');
-        fd.append('title', script?.title || topic.slice(0, 60) || 'Drama');
-        fd.append('type', 'drama-studio');
-        fd.append('thumbnail', firstImg);
-        fd.append('shots', JSON.stringify(vidUrls));
-        if (cid) fd.append('creationId', cid);
-        await fetch('/api/marketing-studio/save-reel', { method: 'POST', body: fd });
+        const title = script?.title || topic.slice(0, 60) || 'Drama';
+        const directUrl = await uploadDirectMediaIfSupported(blob, {
+          kind: 'reel',
+          filename: 'reel.mp4',
+        });
+        if (directUrl) {
+          await postJson('/api/marketing-studio/save-reel', {
+            url: directUrl,
+            title,
+            type: 'drama-studio',
+            thumbnail: firstImg,
+            shots: vidUrls,
+            creationId: cid || '',
+          });
+        } else {
+          const fd = new FormData();
+          fd.append('file', blob, 'reel.mp4');
+          fd.append('title', title);
+          fd.append('type', 'drama-studio');
+          fd.append('thumbnail', firstImg);
+          fd.append('shots', JSON.stringify(vidUrls));
+          if (cid) fd.append('creationId', cid);
+          await fetch('/api/marketing-studio/save-reel', { method: 'POST', body: fd });
+        }
       } catch { /* ignore history save failure */ }
       // 不清 creationId:文件夹已存成片,保留 id 让成片后仍能改角色/重生成时 patch;下次 genScript 会重置。
     } catch (e) {

@@ -1,7 +1,6 @@
-// Atlas SaaS Starter — data model
-// Postgres in production (Supabase / Neon / Vercel Postgres).
-// For zero-config local dev you can switch provider to "sqlite"
-// and set DATABASE_URL="file:./dev.db" (remove directUrl).
+// Atlas Marketing Studio — canonical data model.
+// This SQLite schema generates the Cloudflare D1 client. The build scripts
+// derive a PostgreSQL copy from the same models for Vercel/Neon.
 
 generator client {
   provider   = "prisma-client-js"
