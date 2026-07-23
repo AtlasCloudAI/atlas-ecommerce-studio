@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useSession, signIn } from 'next-auth/react';
 import { Download, Loader2, Clock, Play, X, Film } from 'lucide-react';
 import { useI18n } from '@/i18n/provider';
+import { byokHeaders } from '@/lib/byok';
 
 type DramaAssets = {
   kind: string;
@@ -66,10 +67,13 @@ export default function MyWorkPage() {
         .then((j) => {
           const list = ((j.creations || []) as Creation[]).filter((c) => Boolean(SOURCE[c.templateId]));
           setItems(list);
-          // 推进"生成中"的占位:触发后端完成检测 / 15 分钟超时兜底,下次刷新即生效(不阻塞渲染)。
+          // 推进"生成中"的占位:触发后端任务对账 / 超时兜底,下次刷新即生效(不阻塞渲染)。
           list
             .filter((c) => c.status === 'processing')
-            .forEach((c) => fetch(`/api/creations/${c.id}`, { signal: ac.signal }).catch(() => {}));
+            .forEach((c) => fetch(`/api/creations/${c.id}`, {
+              signal: ac.signal,
+              headers: byokHeaders(),
+            }).catch(() => {}));
         })
         .catch((e) => { if (e?.name !== 'AbortError') setItems((prev) => prev ?? []); });
     void load();

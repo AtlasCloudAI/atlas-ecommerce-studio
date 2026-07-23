@@ -13,7 +13,11 @@ import {
   SHOT_REF_VIDEO_MODEL,
   REPLICA_VIDEO_MODEL,
 } from '@/lib/marketing-studio/workflow';
-import { chargeAndSubmit, chargeErrorResponse } from '@/lib/marketing-studio/gen-task';
+import {
+  chargeAndSubmit,
+  chargeErrorResponse,
+  linkMarketingCreationTask,
+} from '@/lib/marketing-studio/gen-task';
 import { videoCredits } from '@/lib/video-pricing';
 
 export const maxDuration = 60;
@@ -29,6 +33,7 @@ async function __byokPOST(req: Request) {
   const ratio = normalizeVideoRatio(body.ratio);
   const resolution = normalizeVideoResolution(body.resolution);
   const duration = normalizeVideoDuration(body.duration);
+  const creationId = typeof body.creationId === 'string' ? body.creationId.trim() : '';
   if (!prompt) return NextResponse.json({ error: 'prompt_required' }, { status: 400 });
 
   // 本站相对路径(/api/marketing-studio/media/...)补成公网绝对 URL,否则 Atlas 拉不到。
@@ -69,7 +74,14 @@ async function __byokPOST(req: Request) {
       prompt,
       submit: () => submitShotVideo(imageUrl, prompt, { ratio, resolution, duration, model }),
     });
-    return NextResponse.json({ id: submit.id, getUrl: submit.getUrl });
+    const parentLinked = await linkMarketingCreationTask({
+      uid,
+      creationId,
+      taskId: submit.id,
+      getUrl: submit.getUrl,
+      model,
+    });
+    return NextResponse.json({ id: submit.id, getUrl: submit.getUrl, parentLinked });
   } catch (e) {
     return chargeErrorResponse(e, 'marketing/shot-video');
   }

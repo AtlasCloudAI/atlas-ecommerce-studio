@@ -451,6 +451,7 @@ export default function MarketingStudioPage() {
             resolution: videoResolution,
             duration: videoDuration,
             model: REPLICA_VIDEO_MODEL, // 统一 seedance-2.0 i2v(prompt 带台词 + generate_audio):复刻和手动扩写都能对口型出口播
+            creationId: cid,
           }, controller.signal);
           local.vidGetUrl = vd.getUrl;
           setShots([{ ...local }]);

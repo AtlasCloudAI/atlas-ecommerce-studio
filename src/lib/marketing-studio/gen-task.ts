@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { deductCredits, grantCredits } from '@/lib/credits';
 import { isByok } from '@/lib/request-context';
-import { taskOutputUrls } from '@/lib/marketing-studio/task-outputs';
+import {
+  selectInternalTask,
+  taskOutputUrls,
+} from '@/lib/marketing-studio/task-outputs';
 
 // 扣费失败的两种区分:余额不足(→402) vs 系统/DB 错误(→500,不能伪装成"积分不足")。
 export class InsufficientCreditsError extends Error {
@@ -84,13 +87,61 @@ export async function chargeAndSubmit(opts: {
 }
 
 /**
+ * 把最终视频任务挂到工作室级作品占位上。只允许关联当前用户自己的 Marketing Studio
+ * processing 记录；关联失败不能让已提交、已扣费的 Atlas 任务在前端看起来“提交失败”并被重复提交。
+ */
+export async function linkMarketingCreationTask(opts: {
+  uid: string;
+  creationId?: string;
+  taskId: string;
+  getUrl: string;
+  model: string;
+}): Promise<boolean> {
+  const creationId = (opts.creationId || '').trim();
+  if (!creationId) return false;
+  try {
+    const update = await prisma.creation.updateMany({
+      where: {
+        id: creationId,
+        userId: opts.uid,
+        templateId: 'marketing-studio',
+        status: 'processing',
+      },
+      data: {
+        taskId: opts.taskId,
+        getUrl: opts.getUrl,
+        model: opts.model,
+        error: null,
+      },
+    });
+    if (update.count !== 1) {
+      console.warn(`[gen-task] parent creation was not linked: creation=${creationId} task=${opts.taskId}`);
+    }
+    return update.count === 1;
+  } catch (error) {
+    console.error(`[gen-task] parent creation link failed: creation=${creationId} task=${opts.taskId}`, String(error));
+    return false;
+  }
+}
+
+async function trackedTask(getUrl: string, status?: string) {
+  const tasks = await prisma.creation.findMany({
+    where: {
+      getUrl,
+      ...(status ? { status } : {}),
+    },
+  });
+  return selectInternalTask(tasks);
+}
+
+/**
  * poll 发现 Atlas 任务失败时退款。用 getUrl 精确定位落库记录(前端原样传回的 getUrl === 落库时存的
  * getUrl,不依赖对 URL 格式的解析,最可靠)。用 processing→failed 的原子转移做幂等:
  * 只有把状态从 processing 成功改成 failed 的那一次(count===1)才退款,前端多次 poll 不会重复退。
  */
 export async function refundFailedTask(getUrl: string, atlasError?: string): Promise<void> {
   if (!getUrl) return;
-  const c = await prisma.creation.findFirst({ where: { getUrl, status: 'processing' } });
+  const c = await trackedTask(getUrl, 'processing');
   if (!c) return;
   const upd = await prisma.creation.updateMany({
     where: { id: c.id, status: 'processing' },
@@ -113,12 +164,15 @@ export async function refundFailedTask(getUrl: string, atlasError?: string): Pro
  */
 export async function completedTaskOutputs(getUrl: string): Promise<string[] | null> {
   if (!getUrl) return null;
-  const creation = await prisma.creation.findFirst({
+  const creations = await prisma.creation.findMany({
     where: { getUrl, status: 'completed' },
     select: { outputs: true },
   });
-  const outputs = taskOutputUrls(creation?.outputs);
-  return outputs.length ? outputs : null;
+  for (const creation of creations) {
+    const outputs = taskOutputUrls(creation.outputs);
+    if (outputs.length) return outputs;
+  }
+  return null;
 }
 
 export type CompletionClaim =
@@ -134,7 +188,7 @@ export type CompletionClaim =
  */
 export async function claimTaskCompletion(getUrl: string): Promise<CompletionClaim> {
   if (!getUrl) return { kind: 'untracked' };
-  const creation = await prisma.creation.findFirst({ where: { getUrl } });
+  const creation = await trackedTask(getUrl);
   if (!creation) return { kind: 'untracked' };
 
   const existingOutputs = taskOutputUrls(creation.outputs);
@@ -196,7 +250,7 @@ export async function releaseTaskCompletionClaim(getUrl: string): Promise<void> 
  */
 export async function markTaskCompleted(getUrl: string, outputs?: string[]): Promise<boolean> {
   if (!getUrl) return true;
-  const c = await prisma.creation.findFirst({ where: { getUrl } });
+  const c = await trackedTask(getUrl);
   if (!c) return true; // 没有落库记录,无从判断退款,放行
   if (c.status === 'failed') return false; // 已退款,拒绝再交付成片
   await prisma.creation.updateMany({

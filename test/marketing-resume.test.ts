@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { planTaskResume } from '../src/lib/marketing-studio/resume.ts';
-import { taskOutputUrls } from '../src/lib/marketing-studio/task-outputs.ts';
+import {
+  selectInternalTask,
+  taskOutputUrls,
+} from '../src/lib/marketing-studio/task-outputs.ts';
 
 test('a new generation charges both image and video submissions', () => {
   assert.deepEqual(planTaskResume(undefined, 5, 76), {
@@ -44,4 +47,16 @@ test('normalizes cached task outputs from Prisma or raw D1 JSON', () => {
   assert.deepEqual(taskOutputUrls(['/media/a.mp4', '', null]), ['/media/a.mp4']);
   assert.deepEqual(taskOutputUrls('[\"/media/b.mp4\"]'), ['/media/b.mp4']);
   assert.deepEqual(taskOutputUrls('not-json'), []);
+});
+
+test('selects the charged internal task when a parent creation shares its getUrl', () => {
+  const parent = { id: 'parent', templateId: 'marketing-studio', cost: 0 };
+  const internal = { id: 'task', templateId: 'mk-shot', cost: 121 };
+  assert.equal(selectInternalTask([parent, internal])?.id, 'task');
+});
+
+test('selects BYOK internal tasks even when their recorded cost is zero', () => {
+  const parent = { id: 'parent', templateId: 'marketing-studio', cost: 0 };
+  const internal = { id: 'task', templateId: 'mk-shot', cost: 0 };
+  assert.equal(selectInternalTask([parent, internal])?.id, 'task');
 });
