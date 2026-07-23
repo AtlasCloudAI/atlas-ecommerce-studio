@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { deductCredits, grantCredits } from '@/lib/credits';
 import { isByok } from '@/lib/request-context';
+import { taskOutputUrls } from '@/lib/marketing-studio/task-outputs';
 
 // 扣费失败的两种区分:余额不足(→402) vs 系统/DB 错误(→500,不能伪装成"积分不足")。
 export class InsufficientCreditsError extends Error {
@@ -104,6 +105,20 @@ export async function refundFailedTask(getUrl: string, atlasError?: string): Pro
       console.error(`[gen-task] REFUND FAILED (needs manual comp) uid=${c.userId} cost=${c.cost} task=${c.taskId}:`, String(e));
     }
   }
+}
+
+/**
+ * 已完成任务的输出是轮询接口的幂等缓存。刷新页面或网络重试时先返回这里的 R2/Blob URL,
+ * 避免再次下载同一 Atlas 临时文件并重复写入对象存储。
+ */
+export async function completedTaskOutputs(getUrl: string): Promise<string[] | null> {
+  if (!getUrl) return null;
+  const creation = await prisma.creation.findFirst({
+    where: { getUrl, status: 'completed' },
+    select: { outputs: true },
+  });
+  const outputs = taskOutputUrls(creation?.outputs);
+  return outputs.length ? outputs : null;
 }
 
 /**

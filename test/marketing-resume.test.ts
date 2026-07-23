@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { planTaskResume } from '../src/lib/marketing-studio/resume.ts';
+import { taskOutputUrls } from '../src/lib/marketing-studio/task-outputs.ts';
 
 test('a new generation charges both image and video submissions', () => {
   assert.deepEqual(planTaskResume(undefined, 5, 76), {
@@ -37,4 +38,10 @@ test('a refunded terminal video failure reuses the completed image', () => {
   assert.equal(plan.needsImageSubmission, false);
   assert.equal(plan.needsVideoSubmission, true);
   assert.equal(plan.remainingCost, 76);
+});
+
+test('normalizes cached task outputs from Prisma or raw D1 JSON', () => {
+  assert.deepEqual(taskOutputUrls(['/media/a.mp4', '', null]), ['/media/a.mp4']);
+  assert.deepEqual(taskOutputUrls('[\"/media/b.mp4\"]'), ['/media/b.mp4']);
+  assert.deepEqual(taskOutputUrls('not-json'), []);
 });
