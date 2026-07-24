@@ -53,7 +53,7 @@ async function __byokPOST(req: Request) {
   try {
     const raw = await atlasChat(
       [{ role: 'system', content: sys }, { role: 'user', content: parts }],
-      MODEL, 1300, 55000,
+      MODEL, null, 55000,
     );
     const prompt = (raw || '').trim().replace(/^```[a-z]*\n?|\n?```$/g, '').trim();
     if (!prompt) return NextResponse.json({ error: 'empty_output' }, { status: 502 });
